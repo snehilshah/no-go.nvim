@@ -52,6 +52,9 @@ M.defaults = {
 		down = "j",
 		up = "k",
 	},
+
+	-- collapse multi-line import blocks (import with parentheses)
+	collapse_imports = true,
 }
 
 -- current configuration (will be merged with user config)

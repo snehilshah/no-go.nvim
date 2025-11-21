@@ -4,6 +4,23 @@ local queries = require("no-go.queries")
 
 M.namespace = vim.api.nvim_create_namespace("no-go")
 
+M.query_string = [[
+(
+  (if_statement
+    condition: (binary_expression
+      left: (identifier) @err_identifier)
+    consequence: (block
+      (return_statement
+        (expression_list
+          (identifier) @return_identifier)?)) @collapse_block) @if_statement
+)
+]]
+
+M.import_query_string = [[
+(import_declaration
+  (import_spec_list) @import_list) @import_block
+]]
+
 --- Parse and return the Treesitter query for Go error handling patterns
 --- @return vim.treesitter.Query|nil query The parsed query or nil if parsing fails
 function M.get_error_query()
@@ -39,6 +56,16 @@ function M.get_import_query()
 				vim.log.levels.ERROR
 			)
 		end
+		return nil
+	end
+	return query
+end
+
+--- Parse and return the Treesitter query for Go import declarations
+--- @return vim.treesitter.Query|nil The parsed query or nil if parsing fails
+function M.get_import_query()
+	local ok, query = pcall(vim.treesitter.query.parse, "go", M.import_query_string)
+	if not ok then
 		return nil
 	end
 	return query
@@ -108,6 +135,78 @@ function M.apply_collapse(bufnr, if_node, _, return_content, config)
 	local virtual_text_string = utils.build_virtual_text(return_content, config)
 	vim.api.nvim_buf_set_extmark(bufnr, M.namespace, if_start_row, brace_start_col, {
 		virt_text = { { virtual_text_string, config.highlight_group } },
+		virt_text_pos = "inline",
+	})
+end
+
+--- Apply virtual text and concealment to collapse an import block
+--- @param bufnr number The buffer number
+--- @param import_node TSNode The import declaration node
+--- @param config table The plugin configuration
+function M.apply_import_collapse(bufnr, import_node, config)
+	local start_row, start_col, end_row, end_col = import_node:range()
+
+	-- Only collapse multi-line imports (import blocks with parentheses)
+	if end_row <= start_row then
+		return
+	end
+
+	-- Check if cursor is inside this block and reveal_on_cursor is enabled
+	if config.reveal_on_cursor then
+		local wins = vim.fn.win_findbuf(bufnr)
+		for _, win in ipairs(wins) do
+			local cursor = vim.api.nvim_win_get_cursor(win)
+			local cursor_row = cursor[1] - 1 -- Convert to 0-indexed
+
+			if cursor_row >= start_row and cursor_row <= end_row then
+				return
+			end
+		end
+	end
+
+	-- Get the first line to find where "import" keyword ends
+	local first_line = vim.api.nvim_buf_get_lines(bufnr, start_row, start_row + 1, false)[1]
+	if not first_line then
+		return
+	end
+
+	-- Find the opening parenthesis
+	local paren_col = first_line:find("%(")
+	if not paren_col then
+		return
+	end
+
+	-- Conceal from the opening parenthesis to the end of first line
+	vim.api.nvim_buf_set_extmark(bufnr, M.namespace, start_row, paren_col - 1, {
+		end_row = start_row,
+		end_col = #first_line,
+		conceal = "",
+	})
+
+	-- Hide all intermediate lines (the import list)
+	if end_row > start_row then
+		vim.api.nvim_buf_set_extmark(bufnr, M.namespace, start_row + 1, 0, {
+			end_row = end_row,
+			end_col = 0,
+			conceal_lines = "",
+		})
+	end
+
+	-- Count the number of imports
+	local import_count = 0
+	for child in import_node:iter_children() do
+		if child:type() == "import_spec_list" then
+			for _ in child:iter_children() do
+				import_count = import_count + 1
+			end
+			break
+		end
+	end
+
+	-- Add virtual text showing import count
+	local virtual_text = string.format("(%d imports...)", import_count)
+	vim.api.nvim_buf_set_extmark(bufnr, M.namespace, start_row, paren_col - 1, {
+		virt_text = { { virtual_text, config.import_highlight_group or config.highlight_group } },
 		virt_text_pos = "inline",
 	})
 end
@@ -251,6 +350,19 @@ function M.process_buffer(bufnr, config)
 				end
 
 				M.apply_collapse(bufnr, node, collapse_block_node, return_content, config)
+			end
+		end
+	end
+
+	-- Process imports if enabled
+	if config.collapse_imports then
+		local import_query = M.get_import_query()
+		if import_query then
+			for id, node, _ in import_query:iter_captures(root, bufnr, 0, -1) do
+				local capture_name = import_query.captures[id]
+				if capture_name == "import_block" then
+					M.apply_import_collapse(bufnr, node, config)
+				end
 			end
 		end
 	end
