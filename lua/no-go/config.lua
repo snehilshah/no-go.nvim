@@ -48,6 +48,7 @@ M.defaults = {
 	keys = {
 		down = "j",
 		up = "k",
+		enter = "<leader>o",
 	},
 
 	-- collapse multi-line import blocks (import with parentheses)

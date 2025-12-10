@@ -61,6 +61,32 @@ local function setup_keymaps(bufnr, opts)
     end, { buffer = bufnr, desc = "Smart up (preserve goal column)" })
   end
 
+  if opts.keys.enter then
+    vim.keymap.set({ "n", "x", "o" }, opts.keys.enter, function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      local range = utils.find_nearest_concealed_range(bufnr, vim.fn.line(".") - 1, namespace)
+      if not range then
+        return
+      end
+
+      local view = vim.fn.winsaveview()
+
+      -- jump to the first concealed line of the block
+      vim.api.nvim_win_set_cursor(0, { range.start_row + 1, 0 })
+
+      -- reprocess buffer with reveal_on_cursor behavior to unhide this block
+      local effective_opts = opts
+      if not opts.reveal_on_cursor then
+        effective_opts = vim.tbl_deep_extend("force", {}, opts, { reveal_on_cursor = true })
+      end
+      fold.process_buffer(bufnr, effective_opts)
+
+      local new_view = vim.fn.winsaveview()
+      new_view.curswant = view.curswant
+      vim.fn.winrestview(new_view)
+    end, { buffer = bufnr, desc = "Enter concealed block" })
+  end
+
   M.keymap_buffers[bufnr] = true
 end
 
