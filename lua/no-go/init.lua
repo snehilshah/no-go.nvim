@@ -64,7 +64,12 @@ local function setup_keymaps(bufnr, opts)
   if opts.keys.enter then
     vim.keymap.set({ "n", "x", "o" }, opts.keys.enter, function()
       local bufnr = vim.api.nvim_get_current_buf()
-      local range = utils.find_nearest_concealed_range(bufnr, vim.fn.line(".") - 1, namespace)
+      local range = utils.find_nearest_concealed_range(
+        bufnr,
+        vim.fn.line(".") - 1,
+        namespace,
+        opts.keys.enter_search_next ~= false
+      )
       if not range then
         return
       end
@@ -85,6 +90,17 @@ local function setup_keymaps(bufnr, opts)
       new_view.curswant = view.curswant
       vim.fn.winrestview(new_view)
     end, { buffer = bufnr, desc = "Enter concealed block" })
+  end
+
+  if opts.keys.refold then
+    vim.keymap.set({ "n", "x", "o" }, opts.keys.refold, function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      local view = vim.fn.winsaveview()
+      fold.process_buffer(bufnr, opts)
+      local new_view = vim.fn.winsaveview()
+      new_view.curswant = view.curswant
+      vim.fn.winrestview(new_view)
+    end, { buffer = bufnr, desc = "Refold concealed regions" })
   end
 
   M.keymap_buffers[bufnr] = true

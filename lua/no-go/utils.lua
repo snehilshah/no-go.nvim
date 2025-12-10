@@ -134,11 +134,9 @@ end
 
 --- Find the nearest concealed block relative to a row
 --- Prefers a block that starts at or before the given row; otherwise, picks the next block after it
---- @param bufnr number The buffer number
---- @param row number The row number to check from (0-indexed)
---- @param namespace number The namespace ID
+--- @param search_next boolean Whether to look for the next concealed block if none starts before/at row
 --- @return table|nil Table with start_row and end_row (0-indexed), or nil if none found
-function M.find_nearest_concealed_range(bufnr, row, namespace)
+function M.find_nearest_concealed_range(bufnr, row, namespace, search_next)
 	local marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })
 
 	local before = nil
@@ -160,7 +158,15 @@ function M.find_nearest_concealed_range(bufnr, row, namespace)
 		end
 	end
 
-	return before or after
+	if before then
+		return before
+	end
+
+	if search_next then
+		return after
+	end
+
+	return nil
 end
 
 --- lines to skip for smart downward motion
