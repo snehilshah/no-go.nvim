@@ -48,12 +48,12 @@ M.defaults = {
 	keys = {
 		down = "j",
 		up = "k",
-		enter = "<leader>o",
+		enter = "<M-CR>",
 		-- when pressing the enter key, also look for the next concealed block below the cursor
 		-- set to false to only enter a block that starts at/above the current line
 		enter_search_next = true,
 		-- refold concealed regions on demand
-		refold = "<leader>-",
+		refold = "<M-->",
 	},
 
 	-- collapse multi-line import blocks (import with parentheses)
