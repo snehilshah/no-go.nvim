@@ -132,41 +132,27 @@ function M.get_concealed_range(bufnr, row, namespace)
 	return nil
 end
 
---- Find the nearest concealed block relative to a row
---- Prefers a block that starts at or before the given row; otherwise, picks the next block after it
---- @param search_next boolean Whether to look for the next concealed block if none starts before/at row
---- @return table|nil Table with start_row and end_row (0-indexed), or nil if none found
-function M.find_nearest_concealed_range(bufnr, row, namespace, search_next)
+--- Check if the cursor is on the header line of a concealed block (the if err line)
+--- The concealed block starts at header_row + 1, so we check if row + 1 is a conceal_lines start
+--- @param bufnr number The buffer number
+--- @param row number The row number to check (0-indexed)
+--- @param namespace number The namespace ID
+--- @return boolean True if the row is the header of a concealed block
+function M.is_on_fold_header(bufnr, row, namespace)
 	local marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })
-
-	local before = nil
-	local after = nil
 
 	for _, mark in ipairs(marks) do
 		local start_row = mark[2]
 		local details = mark[4]
 
-		if details and details.conceal_lines and details.end_row then
-			local end_row = details.end_row
-
-			if start_row <= row then
-				before = { start_row = start_row, end_row = end_row }
-			else
-				after = { start_row = start_row, end_row = end_row }
-				break -- extmarks are ordered, so first after is nearest
-			end
+		-- conceal_lines marks start at the line after the if statement
+		-- so if we're on row and start_row == row + 1, we're on the header
+		if details and details.conceal_lines and start_row == row + 1 then
+			return true
 		end
 	end
 
-	if before then
-		return before
-	end
-
-	if search_next then
-		return after
-	end
-
-	return nil
+	return false
 end
 
 --- lines to skip for smart downward motion

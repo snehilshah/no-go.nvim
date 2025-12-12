@@ -64,21 +64,16 @@ local function setup_keymaps(bufnr, opts)
   if opts.keys.enter then
     vim.keymap.set({ "n", "x", "o" }, opts.keys.enter, function()
       local bufnr = vim.api.nvim_get_current_buf()
-      local range = utils.find_nearest_concealed_range(
-        bufnr,
-        vim.fn.line(".") - 1,
-        namespace,
-        opts.keys.enter_search_next ~= false
-      )
-      if not range then
+      local row = vim.fn.line(".") - 1 -- 0-indexed
+
+      -- only work if cursor is on the header line of a concealed block
+      if not utils.is_on_fold_header(bufnr, row, namespace) then
+        vim.notify("no-go.nvim: not on a concealed block", vim.log.levels.INFO)
         return
       end
 
       -- save full view state before any changes
       local view = vim.fn.winsaveview()
-
-      -- jump to the first concealed line of the block
-      vim.api.nvim_win_set_cursor(0, { range.start_row + 1, 0 })
 
       -- reprocess buffer with reveal_on_cursor behavior to unhide this block
       local effective_opts = opts
@@ -87,10 +82,7 @@ local function setup_keymaps(bufnr, opts)
       end
       fold.process_buffer(bufnr, effective_opts)
 
-      -- restore the view but keep the new cursor line
-      local new_cursor = vim.api.nvim_win_get_cursor(0)
-      view.lnum = new_cursor[1]
-      view.col = new_cursor[2]
+      -- restore the view (cursor stays on the same line, block is now revealed)
       vim.fn.winrestview(view)
     end, { buffer = bufnr, desc = "Enter concealed block" })
   end
