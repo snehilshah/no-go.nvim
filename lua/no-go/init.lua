@@ -74,6 +74,7 @@ local function setup_keymaps(bufnr, opts)
         return
       end
 
+      -- save full view state before any changes
       local view = vim.fn.winsaveview()
 
       -- jump to the first concealed line of the block
@@ -86,9 +87,11 @@ local function setup_keymaps(bufnr, opts)
       end
       fold.process_buffer(bufnr, effective_opts)
 
-      local new_view = vim.fn.winsaveview()
-      new_view.curswant = view.curswant
-      vim.fn.winrestview(new_view)
+      -- restore the view but keep the new cursor line
+      local new_cursor = vim.api.nvim_win_get_cursor(0)
+      view.lnum = new_cursor[1]
+      view.col = new_cursor[2]
+      vim.fn.winrestview(view)
     end, { buffer = bufnr, desc = "Enter concealed block" })
   end
 
