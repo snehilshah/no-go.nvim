@@ -1,5 +1,8 @@
 local M = {}
 
+-- Only match if statements WITHOUT an else/else-if clause
+-- The #not-has-parent prevents matching nested if statements in else-if chains
+-- The !alternative ensures we don't match if statements that have else clauses
 M.error_query = [[
 (
   (if_statement
@@ -8,7 +11,8 @@ M.error_query = [[
     consequence: (block
       (return_statement
         (expression_list
-          (identifier) @return_identifier)?)) @collapse_block) @if_statement
+          (identifier) @return_identifier)?)) @collapse_block
+    !alternative) @if_statement
 )
 ]]
 
