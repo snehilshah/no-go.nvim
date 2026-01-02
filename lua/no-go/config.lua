@@ -48,9 +48,8 @@ M.defaults = {
 	keys = {
 		down = "j",
 		up = "k",
-		enter = "<M-CR>",
-		-- refold concealed regions on demand
-		refold = "<M-->",
+		-- toggle fold/unfold when on a concealed block header
+		toggle = "<M-o>",
 	},
 
 	-- collapse multi-line import blocks (import with parentheses)

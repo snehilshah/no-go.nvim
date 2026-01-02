@@ -56,8 +56,14 @@ end
 --- @param _ TSNode The block node to collapse
 --- @param return_content string|nil The identifier from the return statement (e.g., "err"), or nil
 --- @param config table The plugin configuration
-function M.apply_collapse(bufnr, if_node, _, return_content, config)
+--- @param revealed_blocks table|nil Table of manually revealed block rows
+function M.apply_collapse(bufnr, if_node, _, return_content, config, revealed_blocks)
 	local if_start_row, _, if_end_row, _ = if_node:range()
+
+	-- check if this block is manually revealed (toggled open)
+	if revealed_blocks and revealed_blocks[if_start_row] then
+		return
+	end
 
 	-- check if cursor is inside this block and reveal_on_cursor is enabled
 	if config.reveal_on_cursor then
@@ -184,7 +190,8 @@ end
 --- Process buffer and apply collapses to error handling blocks
 --- @param bufnr number|nil The buffer number (defaults to current buffer)
 --- @param config table The plugin configuration
-function M.process_buffer(bufnr, config)
+--- @param revealed_blocks table|nil Table of manually revealed block rows
+function M.process_buffer(bufnr, config, revealed_blocks)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
 	-- check if buffer is a go file early
@@ -254,7 +261,7 @@ function M.process_buffer(bufnr, config)
 					return_content = vim.treesitter.get_node_text(return_identifier_node, bufnr)
 				end
 
-				M.apply_collapse(bufnr, node, collapse_block_node, return_content, config)
+				M.apply_collapse(bufnr, node, collapse_block_node, return_content, config, revealed_blocks)
 			end
 		end
 	end

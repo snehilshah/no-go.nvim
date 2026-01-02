@@ -20,6 +20,9 @@ M.enabled_buffers = {}
 
 M.keymap_buffers = {}
 
+-- Track manually revealed blocks per buffer: { [bufnr] = { [row] = true } }
+M.revealed_blocks = {}
+
 --- these keymaps skip over concealed lines using direct cursor movement
 --- only set up when reveal_on_cursor is false!
 --- @param bufnr number The buffer number
@@ -61,41 +64,38 @@ local function setup_keymaps(bufnr, opts)
     end, { buffer = bufnr, desc = "Smart up (preserve goal column)" })
   end
 
-  if opts.keys.enter then
-    vim.keymap.set({ "n", "x", "o" }, opts.keys.enter, function()
+  if opts.keys.toggle then
+    vim.keymap.set({ "n", "x", "o" }, opts.keys.toggle, function()
       local bufnr = vim.api.nvim_get_current_buf()
       local row = vim.fn.line(".") - 1 -- 0-indexed
 
-      -- only work if cursor is on the header line of a concealed block
-      if not utils.is_on_fold_header(bufnr, row, namespace) then
-        vim.notify("no-go.nvim: not on a concealed block", vim.log.levels.INFO)
+      -- initialize tracking for this buffer if needed
+      if not M.revealed_blocks[bufnr] then
+        M.revealed_blocks[bufnr] = {}
+      end
+
+      local view = vim.fn.winsaveview()
+
+      -- check if this row is a manually revealed block -> refold it
+      if M.revealed_blocks[bufnr][row] then
+        M.revealed_blocks[bufnr][row] = nil
+        fold.process_buffer(bufnr, opts, M.revealed_blocks[bufnr])
+        vim.fn.winrestview(view)
         return
       end
 
-      -- save full view state before any changes
-      local view = vim.fn.winsaveview()
-
-      -- reprocess buffer with reveal_on_cursor behavior to unhide this block
-      local effective_opts = opts
-      if not opts.reveal_on_cursor then
-        effective_opts = vim.tbl_deep_extend("force", {}, opts, { reveal_on_cursor = true })
+      -- check if cursor is on the header line of a concealed block -> reveal it
+      if utils.is_on_fold_header(bufnr, row, namespace) then
+        M.revealed_blocks[bufnr][row] = true
+        -- reprocess with reveal_on_cursor to unhide this block
+        local effective_opts = vim.tbl_deep_extend("force", {}, opts, { reveal_on_cursor = true })
+        fold.process_buffer(bufnr, effective_opts, M.revealed_blocks[bufnr])
+        vim.fn.winrestview(view)
+        return
       end
-      fold.process_buffer(bufnr, effective_opts)
 
-      -- restore the view (cursor stays on the same line, block is now revealed)
-      vim.fn.winrestview(view)
-    end, { buffer = bufnr, desc = "Enter concealed block" })
-  end
-
-  if opts.keys.refold then
-    vim.keymap.set({ "n", "x", "o" }, opts.keys.refold, function()
-      local bufnr = vim.api.nvim_get_current_buf()
-      local view = vim.fn.winsaveview()
-      fold.process_buffer(bufnr, opts)
-      local new_view = vim.fn.winsaveview()
-      new_view.curswant = view.curswant
-      vim.fn.winrestview(new_view)
-    end, { buffer = bufnr, desc = "Refold concealed regions" })
+      vim.notify("no-go.nvim: not on a concealed block", vim.log.levels.INFO)
+    end, { buffer = bufnr, desc = "Toggle fold/unfold concealed block" })
   end
 
   M.keymap_buffers[bufnr] = true
@@ -130,7 +130,7 @@ function M.setup(user_config)
         if vim.api.nvim_buf_is_valid(args.buf) and not M.disabled_buffers[args.buf] then
           -- process if globally enabled OR buffer is explicitly enabled
           if M.is_globally_enabled or M.enabled_buffers[args.buf] then
-            fold.process_buffer(args.buf, opts)
+            fold.process_buffer(args.buf, opts, M.revealed_blocks[args.buf])
           end
         end
       end, 10)
@@ -158,7 +158,7 @@ function M.setup(user_config)
             if M.is_globally_enabled or M.enabled_buffers[args.buf] then
               -- need to save the goal cursor
               local view = vim.fn.winsaveview()
-              fold.process_buffer(args.buf, opts)
+              fold.process_buffer(args.buf, opts, M.revealed_blocks[args.buf])
               -- and restore it here
               local new_view = vim.fn.winsaveview()
               new_view.curswant = view.curswant
@@ -175,7 +175,7 @@ function M.setup(user_config)
     local ft = vim.api.nvim_get_option_value("filetype", { buf = current_buf })
     if ft == "go" then
       setup_keymaps(current_buf, opts)
-      fold.process_buffer(current_buf, opts)
+      fold.process_buffer(current_buf, opts, M.revealed_blocks[current_buf])
     end
   end
 
@@ -190,7 +190,7 @@ function M.refresh()
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
-  fold.process_buffer(bufnr, config.options)
+  fold.process_buffer(bufnr, config.options, M.revealed_blocks[bufnr])
 end
 
 -- GLOBAL COMMANDS (affect all buffers)
@@ -233,7 +233,7 @@ function M.enable()
     if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
       local ft = vim.api.nvim_get_option_value("filetype", { buf = bufnr })
       if ft == "go" and not M.disabled_buffers[bufnr] then
-        fold.process_buffer(bufnr, config.options)
+        fold.process_buffer(bufnr, config.options, M.revealed_blocks[bufnr])
       end
     end
   end
@@ -291,7 +291,7 @@ function M.enable_buffer()
     M.enabled_buffers[bufnr] = true
   end
 
-  fold.process_buffer(bufnr, config.options)
+  fold.process_buffer(bufnr, config.options, M.revealed_blocks[bufnr])
 end
 
 --- Toggle the plugin for current buffer only
