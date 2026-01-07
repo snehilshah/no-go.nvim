@@ -34,7 +34,6 @@ M.defaults = {
 		"BufEnter",
 		"BufWritePost",
 		"TextChanged",
-		"TextChangedI",
 		"InsertLeave",
 	},
 
