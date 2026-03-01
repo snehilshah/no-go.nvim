@@ -65,19 +65,16 @@ function M.apply_collapse(bufnr, if_node, _, return_content, config, revealed_bl
 		return
 	end
 
-	-- check if cursor is inside this block and reveal_on_cursor is enabled
-	if config.reveal_on_cursor then
-		-- get all windows showing this buffer
-		local wins = vim.fn.win_findbuf(bufnr)
-		for _, win in ipairs(wins) do
-			local cursor = vim.api.nvim_win_get_cursor(win)
-			local cursor_row = cursor[1] - 1 -- Convert to 0-indexed
+	-- always check if cursor is inside this block to avoid folding code the user is editing
+	local wins = vim.fn.win_findbuf(bufnr)
+	for _, win in ipairs(wins) do
+		local cursor = vim.api.nvim_win_get_cursor(win)
+		local cursor_row = cursor[1] - 1 -- Convert to 0-indexed
 
-			-- if cursor is on the if line OR inside the block, don't apply concealment!
-			-- this allows the user to navigate inside the revealed error handling code
-			if cursor_row >= if_start_row and cursor_row <= if_end_row then
-				return
-			end
+		-- if cursor is on the if line OR inside the block, don't apply concealment!
+		-- this allows the user to navigate inside the revealed error handling code
+		if cursor_row >= if_start_row and cursor_row <= if_end_row then
+			return
 		end
 	end
 
@@ -125,16 +122,14 @@ end
 function M.apply_import_collapse(bufnr, import_node, config)
 	local import_start_row, _, import_end_row, _ = import_node:range()
 
-	-- check if cursor is inside this block and reveal_on_cursor is enabled
-	if config.reveal_on_cursor then
-		local wins = vim.fn.win_findbuf(bufnr)
-		for _, win in ipairs(wins) do
-			local cursor = vim.api.nvim_win_get_cursor(win)
-			local cursor_row = cursor[1] - 1
+	-- always check if cursor is inside this block to avoid folding code the user is editing
+	local wins = vim.fn.win_findbuf(bufnr)
+	for _, win in ipairs(wins) do
+		local cursor = vim.api.nvim_win_get_cursor(win)
+		local cursor_row = cursor[1] - 1
 
-			if cursor_row >= import_start_row and cursor_row <= import_end_row then
-				return
-			end
+		if cursor_row >= import_start_row and cursor_row <= import_end_row then
+			return
 		end
 	end
 
