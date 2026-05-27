@@ -9,8 +9,7 @@ local error_query_with_statement_list = [[
     consequence: (block
       (statement_list
         (return_statement
-          (expression_list
-            (identifier) @return_identifier)?))) @collapse_block
+          (expression_list)? @return_expr_list))) @collapse_block
     !alternative) @if_statement
 )
 ]]
@@ -23,8 +22,7 @@ local error_query_without_statement_list = [[
       left: (identifier) @err_identifier)
     consequence: (block
       (return_statement
-        (expression_list
-          (identifier) @return_identifier)?)) @collapse_block
+        (expression_list)? @return_expr_list)) @collapse_block
     !alternative) @if_statement
 )
 ]]
@@ -45,7 +43,13 @@ M.error_query = get_error_query()
 
 M.import_query = [[
 (import_declaration
-  (import_spec_list) @import_list) @import_block
+  (import_spec_list
+    (import_spec
+      path: (interpreted_string_literal
+        (interpreted_string_literal_content)))
+    (import_spec
+      path: (interpreted_string_literal
+        (interpreted_string_literal_content)))) @collapse_block) @import_statement
 ]]
 
 return M

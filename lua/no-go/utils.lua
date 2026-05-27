@@ -61,25 +61,32 @@ function M.find_closing_pair(bufnr, if_end_row, char)
 	return brace_col
 end
 
---- Build virtual text string based on return content and config
---- Format: prefix + [content + content_separator] + return_character + suffix
---- @param content string|nil The identifier from the return statement (e.g., "err"), or nil
+--- Normalize whitespace in a multi-line return expression to a single line.
+--- @param text string Raw expression text from treesitter (may contain newlines/tabs)
+--- @return string A single-line representation, with runs of whitespace collapsed.
+function M.normalize_return_text(text)
+	if not text then
+		return ""
+	end
+	-- collapse newlines/tabs/multi-space runs into a single space
+	local out = text:gsub("[\n\r\t]+", " ")
+	out = out:gsub("  +", " ")
+	out = out:gsub("^%s+", ""):gsub("%s+$", "")
+	return out
+end
+
+--- Build virtual text from the literal return expression.
+--- Format: prefix .. return_text .. suffix (return_text falls back to config.virtual_text.empty_text)
+--- @param return_text string|nil The full text of the return statement's expression list (e.g. "nil, err")
 --- @param config table The plugin configuration
 --- @return string The formatted virtual text string
-function M.build_virtual_text(content, config)
-	local vtext = config.virtual_text
-	local result = vtext.prefix or " "
-
-	if content and content ~= "" then
-		result = result .. content
-		result = result .. (vtext.content_separator or " ")
+function M.build_virtual_text(return_text, config)
+	local vtext = config.virtual_text or {}
+	local body = M.normalize_return_text(return_text)
+	if body == "" then
+		body = vtext.empty_text or "return"
 	end
-
-	result = result .. (vtext.return_character or "󱞿 ")
-
-	result = result .. (vtext.suffix or "")
-
-	return result
+	return (vtext.prefix or "󱞿  ") .. body .. (vtext.suffix or "")
 end
 
 --- Check if a line is concealed by an extmark

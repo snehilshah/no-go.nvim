@@ -8,19 +8,20 @@ M.defaults = {
 	-- identifiers to match in if statements (e.g., "if err != nil", "if error != nil")
 	identifiers = { "err" },
 
-	-- virtual text structure for a collapsed error handling block
-	-- formatted will be: prefix + content + content_separator + return_character + suffix
+	-- virtual text structure for a collapsed error handling block.
+	-- Rendered as: prefix .. return_text .. suffix
+	-- return_text is the literal return expression (e.g., "nil, err", "err", "fmt.Errorf(...)")
+	-- or `empty_text` when the return statement has no expression list.
 	virtual_text = {
-		prefix = ": ",
-		content_separator = " ",
-		return_character = "󱞿 ",
+		prefix = "󱞿  ",
 		suffix = "",
+		empty_text = "return",
 	},
 
 	-- virtual text for collapsed import blocks
 	import_virtual_text = {
-		prefix = " ",
-		suffix = "  ",
+		prefix = "󰏗  ",
+		suffix = " ",
 	},
 
 	highlight_group = "NoGoZone",
@@ -36,6 +37,9 @@ M.defaults = {
 		"TextChanged",
 		"InsertLeave",
 	},
+
+	-- debounce window (ms) for batching update_events into a single buffer scan
+	debounce_ms = 60,
 
 	-- reveal concealed lines when cursor is on the if err != nil line,
 	-- allows you to inspect the error handling by hovering over the collapsed line

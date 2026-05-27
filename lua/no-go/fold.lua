@@ -4,13 +4,23 @@ local queries = require("no-go.queries")
 
 M.namespace = vim.api.nvim_create_namespace("no-go")
 
+-- Cached parsed queries (parse once, reuse)
+local _error_query
+local _import_query
+
+-- Per-buffer reentrancy guard: prevents process_buffer from re-entering itself
+-- when extmark operations or window calls trigger autocmds.
+local _busy = {}
+
 --- Parse and return the Treesitter query for Go error handling patterns
 --- @return vim.treesitter.Query|nil query The parsed query or nil if parsing fails
 function M.get_error_query()
-	local has_parser = pcall(vim.treesitter.language.inspect, "go")
-
+	if _error_query then
+		return _error_query
+	end
 	local ok, query = pcall(vim.treesitter.query.parse, "go", queries.error_query)
 	if not ok then
+		local has_parser = pcall(vim.treesitter.language.inspect, "go")
 		if not has_parser then
 			vim.notify("no-go.nvim: Go parser not found. Install it with :TSInstall go", vim.log.levels.ERROR)
 		else
@@ -21,16 +31,19 @@ function M.get_error_query()
 		end
 		return nil
 	end
-	return query
+	_error_query = query
+	return _error_query
 end
 
 --- Parse and return the Treesitter query for Go import blocks
 --- @return vim.treesitter.Query|nil query The parsed query or nil if parsing fails
 function M.get_import_query()
-	local has_parser = pcall(vim.treesitter.language.inspect, "go")
-
+	if _import_query then
+		return _import_query
+	end
 	local ok, query = pcall(vim.treesitter.query.parse, "go", queries.import_query)
 	if not ok then
+		local has_parser = pcall(vim.treesitter.language.inspect, "go")
 		if not has_parser then
 			vim.notify("no-go.nvim: Go parser not found. Install it with :TSInstall go", vim.log.levels.ERROR)
 		else
@@ -41,7 +54,8 @@ function M.get_import_query()
 		end
 		return nil
 	end
-	return query
+	_import_query = query
+	return _import_query
 end
 
 --- Clear all extmarks in the specified buffer
@@ -50,14 +64,24 @@ function M.clear_extmarks(bufnr)
 	vim.api.nvim_buf_clear_namespace(bufnr, M.namespace, 0, -1)
 end
 
+--- True if cursor in any window showing `bufnr` sits between start_row..end_row (inclusive, 0-indexed).
+local function cursor_in_range(bufnr, start_row, end_row)
+	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+		local cursor_row = vim.api.nvim_win_get_cursor(win)[1] - 1
+		if cursor_row >= start_row and cursor_row <= end_row then
+			return true
+		end
+	end
+	return false
+end
+
 --- Apply virtual text and concealment to collapse an error handling block
 --- @param bufnr number The buffer number
 --- @param if_node TSNode The if statement node
---- @param _ TSNode The block node to collapse
---- @param return_content string|nil The identifier from the return statement (e.g., "err"), or nil
+--- @param return_text string|nil The literal text of the return expression list, or nil
 --- @param config table The plugin configuration
 --- @param revealed_blocks table|nil Table of manually revealed block rows
-function M.apply_collapse(bufnr, if_node, _, return_content, config, revealed_blocks)
+function M.apply_collapse(bufnr, if_node, return_text, config, revealed_blocks)
 	local if_start_row, _, if_end_row, _ = if_node:range()
 
 	-- check if this block is manually revealed (toggled open)
@@ -65,17 +89,9 @@ function M.apply_collapse(bufnr, if_node, _, return_content, config, revealed_bl
 		return
 	end
 
-	-- always check if cursor is inside this block to avoid folding code the user is editing
-	local wins = vim.fn.win_findbuf(bufnr)
-	for _, win in ipairs(wins) do
-		local cursor = vim.api.nvim_win_get_cursor(win)
-		local cursor_row = cursor[1] - 1 -- Convert to 0-indexed
-
-		-- if cursor is on the if line OR inside the block, don't apply concealment!
-		-- this allows the user to navigate inside the revealed error handling code
-		if cursor_row >= if_start_row and cursor_row <= if_end_row then
-			return
-		end
+	-- check if cursor is inside this block to avoid folding code the user is editing
+	if config.reveal_on_cursor and cursor_in_range(bufnr, if_start_row, if_end_row) then
+		return
 	end
 
 	local brace_start_col = utils.find_opening_pair(bufnr, if_start_row, "{")
@@ -83,32 +99,28 @@ function M.apply_collapse(bufnr, if_node, _, return_content, config, revealed_bl
 		return
 	end
 
-	local brace_end_col = utils.find_closing_pair(bufnr, if_end_row, "}")
-	if not brace_end_col then
+	-- Conceal from { to end of the if line
+	local if_line = vim.api.nvim_buf_get_lines(bufnr, if_start_row, if_start_row + 1, false)[1]
+	if not if_line then
 		return
 	end
 
-	-- Conceal from { to end of the if line (hide the opening brace and anything after it)
-	local if_line = vim.api.nvim_buf_get_lines(bufnr, if_start_row, if_start_row + 1, false)[1]
-	if if_line then
-		vim.api.nvim_buf_set_extmark(bufnr, M.namespace, if_start_row, brace_start_col, {
-			end_row = if_start_row,
-			end_col = #if_line, -- End of line
-			conceal = "",
-		})
-	end
+	vim.api.nvim_buf_set_extmark(bufnr, M.namespace, if_start_row, brace_start_col, {
+		end_row = if_start_row,
+		end_col = #if_line,
+		conceal = "",
+	})
 
-	-- hide all intermediate lines completely using conceal_lines, lines between braces
-	-- includes the body of the if block AND the closing brace line (yes!)
+	-- Hide intermediate lines + closing brace (end_row inclusive)
 	if if_end_row > if_start_row then
 		vim.api.nvim_buf_set_extmark(bufnr, M.namespace, if_start_row + 1, 0, {
-			end_row = if_end_row, -- end_row is inclusive, so this hides from if_start_row+1 to if_end_row
+			end_row = if_end_row,
 			end_col = 0,
 			conceal_lines = "",
 		})
 	end
 
-	local virtual_text_string = utils.build_virtual_text(return_content, config)
+	local virtual_text_string = utils.build_virtual_text(return_text, config)
 	vim.api.nvim_buf_set_extmark(bufnr, M.namespace, if_start_row, brace_start_col, {
 		virt_text = { { virtual_text_string, config.highlight_group } },
 		virt_text_pos = "inline",
@@ -122,15 +134,8 @@ end
 function M.apply_import_collapse(bufnr, import_node, config)
 	local import_start_row, _, import_end_row, _ = import_node:range()
 
-	-- always check if cursor is inside this block to avoid folding code the user is editing
-	local wins = vim.fn.win_findbuf(bufnr)
-	for _, win in ipairs(wins) do
-		local cursor = vim.api.nvim_win_get_cursor(win)
-		local cursor_row = cursor[1] - 1
-
-		if cursor_row >= import_start_row and cursor_row <= import_end_row then
-			return
-		end
+	if config.reveal_on_cursor and cursor_in_range(bufnr, import_start_row, import_end_row) then
+		return
 	end
 
 	local paren_start_col = utils.find_opening_pair(bufnr, import_start_row, "(")
@@ -138,22 +143,17 @@ function M.apply_import_collapse(bufnr, import_node, config)
 		return
 	end
 
-	local paren_end_col = utils.find_closing_pair(bufnr, import_end_row, ")")
-	if not paren_end_col then
+	local import_line = vim.api.nvim_buf_get_lines(bufnr, import_start_row, import_start_row + 1, false)[1]
+	if not import_line then
 		return
 	end
 
-	-- Conceal from ( to end of the import line
-	local import_line = vim.api.nvim_buf_get_lines(bufnr, import_start_row, import_start_row + 1, false)[1]
-	if import_line then
-		vim.api.nvim_buf_set_extmark(bufnr, M.namespace, import_start_row, paren_start_col, {
-			end_row = import_start_row,
-			end_col = #import_line,
-			conceal = "",
-		})
-	end
+	vim.api.nvim_buf_set_extmark(bufnr, M.namespace, import_start_row, paren_start_col, {
+		end_row = import_start_row,
+		end_col = #import_line,
+		conceal = "",
+	})
 
-	-- hide all intermediate lines
 	if import_end_row > import_start_row then
 		vim.api.nvim_buf_set_extmark(bufnr, M.namespace, import_start_row + 1, 0, {
 			end_row = import_end_row,
@@ -162,7 +162,6 @@ function M.apply_import_collapse(bufnr, import_node, config)
 		})
 	end
 
-	-- Count import packages
 	local import_count = 0
 	for child in import_node:iter_children() do
 		if child:type() == "import_spec_list" then
@@ -182,6 +181,79 @@ function M.apply_import_collapse(bufnr, import_node, config)
 	})
 end
 
+--- Walk error_query matches, applying collapse to each matched if_statement.
+--- Dedupes by if_node start row so the same if can't be collapsed twice in one pass.
+local function process_error_matches(bufnr, root, config, revealed_blocks)
+	local error_query = M.get_error_query()
+	if not error_query then
+		return
+	end
+
+	local seen = {}
+	for _, match, _ in error_query:iter_matches(root, bufnr, 0, -1, { all = true }) do
+		local if_nodes = nil
+		local err_nodes = nil
+		local ret_nodes = nil
+		local collapse_nodes = nil
+
+		for cap_id, nodes in pairs(match) do
+			local name = error_query.captures[cap_id]
+			if name == "if_statement" then
+				if_nodes = nodes
+			elseif name == "err_identifier" then
+				err_nodes = nodes
+			elseif name == "return_expr_list" then
+				ret_nodes = nodes
+			elseif name == "collapse_block" then
+				collapse_nodes = nodes
+			end
+		end
+
+		local if_node = if_nodes and if_nodes[1]
+		local err_node = err_nodes and err_nodes[1]
+		local collapse_node = collapse_nodes and collapse_nodes[1]
+		if if_node and err_node and collapse_node then
+			local start_row = select(1, if_node:range())
+			if not seen[start_row] and utils.is_configured_identifier(err_node, bufnr, config) then
+				seen[start_row] = true
+				local return_text
+				if ret_nodes and ret_nodes[1] then
+					return_text = vim.treesitter.get_node_text(ret_nodes[1], bufnr)
+				end
+				M.apply_collapse(bufnr, if_node, return_text, config, revealed_blocks)
+			end
+		end
+	end
+end
+
+--- Walk import_query matches.
+local function process_import_matches(bufnr, root, config)
+	local import_query = M.get_import_query()
+	if not import_query then
+		return
+	end
+
+	local seen = {}
+	for _, match, _ in import_query:iter_matches(root, bufnr, 0, -1, { all = true }) do
+		local import_nodes = nil
+		for cap_id, nodes in pairs(match) do
+			local name = import_query.captures[cap_id]
+			if name == "import_statement" then
+				import_nodes = nodes
+			end
+		end
+
+		local import_node = import_nodes and import_nodes[1]
+		if import_node then
+			local start_row = select(1, import_node:range())
+			if not seen[start_row] then
+				seen[start_row] = true
+				M.apply_import_collapse(bufnr, import_node, config)
+			end
+		end
+	end
+end
+
 --- Process buffer and apply collapses to error handling blocks
 --- @param bufnr number|nil The buffer number (defaults to current buffer)
 --- @param config table The plugin configuration
@@ -190,88 +262,45 @@ function M.process_buffer(bufnr, config, revealed_blocks)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
 	-- check if buffer is a go file early
-	local filetype = vim.api.nvim_get_option_value("filetype", { buf = bufnr })
-	if filetype ~= "go" then
+	if vim.api.nvim_get_option_value("filetype", { buf = bufnr }) ~= "go" then
 		return
 	end
 
-	M.clear_extmarks(bufnr)
+	-- reentrancy guard: skip if another process_buffer is mid-flight for this buffer
+	if _busy[bufnr] then
+		return
+	end
+	_busy[bufnr] = true
 
-	-- set conceallevel at the window level so concealing works
-	vim.api.nvim_buf_call(bufnr, function()
-		vim.wo.conceallevel = 2
-		vim.wo.concealcursor = "nvic" -- conceal in all modes
+	local ok, err = pcall(function()
+		M.clear_extmarks(bufnr)
+
+		-- set conceallevel at the window level so concealing works
+		vim.api.nvim_buf_call(bufnr, function()
+			vim.wo.conceallevel = 2
+			vim.wo.concealcursor = "nvic" -- conceal in all modes
+		end)
+
+		local parser_ok, parser = pcall(vim.treesitter.get_parser, bufnr, "go")
+		if not parser_ok or not parser then
+			return
+		end
+
+		local tree = parser:parse()[1]
+		if not tree then
+			return
+		end
+
+		local root = tree:root()
+		process_error_matches(bufnr, root, config, revealed_blocks)
+		if config.collapse_imports then
+			process_import_matches(bufnr, root, config)
+		end
 	end)
 
-	local error_query = M.get_error_query()
-	if not error_query then
-		return
-	end
-
-	local ok, parser = pcall(vim.treesitter.get_parser, bufnr, "go")
+	_busy[bufnr] = nil
 	if not ok then
-		return
-	end
-
-	local tree = parser:parse()[1]
-	if not tree then
-		return
-	end
-
-	local root = tree:root()
-
-	-- iterate err query matches
-	for id, node, _ in error_query:iter_captures(root, bufnr, 0, -1) do
-		local capture_name = error_query.captures[id]
-
-		if capture_name == "if_statement" then -- checking capture group
-			local err_identifier_node = nil
-			local collapse_block_node = nil
-			local return_identifier_node = nil
-
-			-- gets the nodes we need to make the virtual text, and what we will collapse
-			for child_id, child_node, _ in error_query:iter_captures(node, bufnr, 0, -1) do
-				local child_capture_name = error_query.captures[child_id]
-
-				if child_capture_name == "err_identifier" then
-					err_identifier_node = child_node
-				elseif child_capture_name == "collapse_block" then
-					collapse_block_node = child_node
-				elseif child_capture_name == "return_identifier" then
-					return_identifier_node = child_node
-				end
-			end
-
-			-- collapse if:
-			---- identifier is in the configured identifiers list
-			---- have a collapse block (statement_list with return)
-			if
-				err_identifier_node
-				and utils.is_configured_identifier(err_identifier_node, bufnr, config)
-				and collapse_block_node
-			then
-				-- get the returned var name, for err ^ text
-				local return_content = nil
-				if return_identifier_node then
-					return_content = vim.treesitter.get_node_text(return_identifier_node, bufnr)
-				end
-
-				M.apply_collapse(bufnr, node, collapse_block_node, return_content, config, revealed_blocks)
-			end
-		end
-	end
-
-	-- Process imports if enabled
-	if config.collapse_imports then
-		local import_query = M.get_import_query()
-		if import_query then
-			for id, node, _ in import_query:iter_captures(root, bufnr, 0, -1) do
-				local capture_name = import_query.captures[id]
-				if capture_name == "import_block" then
-					M.apply_import_collapse(bufnr, node, config)
-				end
-			end
-		end
+		vim.notify("no-go.nvim: process_buffer error: " .. tostring(err), vim.log.levels.ERROR)
 	end
 end
 
