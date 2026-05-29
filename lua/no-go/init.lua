@@ -96,14 +96,8 @@ local function setup_keymaps(bufnr, opts)
 			if vim.fn.reg_recording() ~= "" or vim.fn.reg_executing() ~= "" then
 				return "j"
 			end
-			local view = vim.fn.winsaveview()
 			local lines = utils.smart_down_lines(vim.v.count1, namespace)
-			if lines > 0 then
-				vim.cmd("normal! " .. lines .. "j")
-				local new_view = vim.fn.winsaveview()
-				new_view.curswant = view.curswant
-				vim.fn.winrestview(new_view)
-			end
+			return lines > 0 and (lines .. "j") or ""
 		end, { buffer = bufnr, desc = "Smart down (preserve goal column)", expr = true })
 	end
 
@@ -112,14 +106,8 @@ local function setup_keymaps(bufnr, opts)
 			if vim.fn.reg_recording() ~= "" or vim.fn.reg_executing() ~= "" then
 				return "k"
 			end
-			local view = vim.fn.winsaveview()
 			local lines = utils.smart_up_lines(vim.v.count1, namespace)
-			if lines > 0 then
-				vim.cmd("normal! " .. lines .. "k")
-				local new_view = vim.fn.winsaveview()
-				new_view.curswant = view.curswant
-				vim.fn.winrestview(new_view)
-			end
+			return lines > 0 and (lines .. "k") or ""
 		end, { buffer = bufnr, desc = "Smart up (preserve goal column)", expr = true })
 	end
 
