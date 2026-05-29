@@ -44,6 +44,10 @@ local function schedule_refresh(bufnr, opts, delay_ms)
 		return
 	end
 
+	if vim.fn.reg_recording() ~= "" or vim.fn.reg_executing() ~= "" then
+		return
+	end
+
 	local existing = _timers[bufnr]
 	if existing then
 		existing:stop()
@@ -89,6 +93,9 @@ local function setup_keymaps(bufnr, opts)
 
 	if opts.keys.down then
 		vim.keymap.set({ "n", "x", "o" }, opts.keys.down, function()
+			if vim.fn.reg_recording() ~= "" or vim.fn.reg_executing() ~= "" then
+				return "j"
+			end
 			local view = vim.fn.winsaveview()
 			local lines = utils.smart_down_lines(vim.v.count1, namespace)
 			if lines > 0 then
@@ -97,11 +104,14 @@ local function setup_keymaps(bufnr, opts)
 				new_view.curswant = view.curswant
 				vim.fn.winrestview(new_view)
 			end
-		end, { buffer = bufnr, desc = "Smart down (preserve goal column)" })
+		end, { buffer = bufnr, desc = "Smart down (preserve goal column)", expr = true })
 	end
 
 	if opts.keys.up then
 		vim.keymap.set({ "n", "x", "o" }, opts.keys.up, function()
+			if vim.fn.reg_recording() ~= "" or vim.fn.reg_executing() ~= "" then
+				return "k"
+			end
 			local view = vim.fn.winsaveview()
 			local lines = utils.smart_up_lines(vim.v.count1, namespace)
 			if lines > 0 then
@@ -110,7 +120,7 @@ local function setup_keymaps(bufnr, opts)
 				new_view.curswant = view.curswant
 				vim.fn.winrestview(new_view)
 			end
-		end, { buffer = bufnr, desc = "Smart up (preserve goal column)" })
+		end, { buffer = bufnr, desc = "Smart up (preserve goal column)", expr = true })
 	end
 
 	if opts.keys.toggle then
